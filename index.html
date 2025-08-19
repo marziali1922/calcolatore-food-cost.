@@ -13,6 +13,15 @@
             font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #f0f4f8, #e6e9f0);
         }
+        .message-box {
+            animation: fadeInOut 5s forwards;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
     </style>
     <!-- Firebase SDKs -->
     <script type="module">
@@ -47,6 +56,7 @@
         const editCostInput = document.getElementById('edit-cost');
         const editUnitInput = document.getElementById('edit-unit');
         const saveEditButton = document.getElementById('save-edit-btn');
+        const currentRecipeCostDisplay = document.getElementById('current-recipe-cost');
         
         let ingredients = [];
 
@@ -112,7 +122,7 @@
             
             ingredients.forEach(ingredient => {
                 const li = document.createElement('div');
-                li.className = "flex items-center justify-between p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
+                li.className = "flex items-center justify-between p-4 bg-white rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
                 li.innerHTML = `
                     <div>
                         <span class="font-semibold text-gray-800 text-lg">${ingredient.name}</span>
@@ -142,22 +152,25 @@
             });
 
             // Add new ingredient button
-            const addIngredientBtn = document.getElementById('add-ingredient-btn');
+            let addIngredientBtn = ingredientsForm.querySelector('#add-ingredient-btn');
             if (!addIngredientBtn) {
-                const addBtnHtml = `<button id="add-ingredient-btn" type="submit" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md flex items-center justify-center">
-                    <i class="fas fa-plus mr-2"></i> Aggiungi Ingrediente
-                </button>`;
-                ingredientsForm.insertAdjacentHTML('beforeend', addBtnHtml);
+                addIngredientBtn = document.createElement('button');
+                addIngredientBtn.id = 'add-ingredient-btn';
+                addIngredientBtn.type = 'submit';
+                addIngredientBtn.className = "bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md flex items-center justify-center";
+                addIngredientBtn.innerHTML = '<i class="fas fa-plus mr-2"></i> Aggiungi Ingrediente';
+                ingredientsForm.appendChild(addIngredientBtn);
             }
             
             attachIngredientEventListeners();
+            updateRecipeCost();
         }
 
         function renderRecipes(recipes) {
             recipesList.innerHTML = '';
             recipes.forEach(recipe => {
                 const li = document.createElement('div');
-                li.className = "p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
+                li.className = "p-4 bg-white rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
                 li.innerHTML = `
                     <div class="flex items-center justify-between">
                         <h3 class="font-semibold text-gray-800 text-lg">${recipe.name}</h3>
@@ -191,6 +204,23 @@
                     showMessage('Ricetta eliminata con successo!', false);
                 });
             });
+        }
+
+        function updateRecipeCost() {
+            let totalCost = 0;
+            const ingredientItems = recipesForm.querySelectorAll('.recipe-ingredient-item');
+            ingredientItems.forEach(item => {
+                const ingredientId = item.querySelector('.ingredient-select').value;
+                const quantity = parseFloat(item.querySelector('.ingredient-quantity').value);
+
+                if (ingredientId && quantity) {
+                    const foundIngredient = ingredients.find(ing => ing.id === ingredientId);
+                    if (foundIngredient) {
+                        totalCost += foundIngredient.cost * quantity;
+                    }
+                }
+            });
+            currentRecipeCostDisplay.textContent = `Costo Totale: €${totalCost.toFixed(2)}`;
         }
         
         // --- Event Listeners ---
@@ -322,6 +352,7 @@
                     recipesForm.reset();
                     // Clear dynamically added ingredients except the first one
                     recipesForm.querySelectorAll('.recipe-ingredient-item:not(:first-of-type)').forEach(el => el.remove());
+                    updateRecipeCost(); // Update the cost display
                     showMessage('Ricetta aggiunta con successo!', false);
                 } catch (error) {
                     console.error("Errore durante l'aggiunta della ricetta:", error);
@@ -354,11 +385,14 @@
                 const newRemoveButton = ingredientsContainer.lastElementChild.querySelector('.remove-recipe-ingredient-btn');
                 newRemoveButton.addEventListener('click', (e) => {
                     e.currentTarget.closest('.recipe-ingredient-item').remove();
+                    updateRecipeCost();
                 });
-                
-                // Attach input listener to the newly added quantity field to update cost
+
                 const newQuantityInput = ingredientsContainer.lastElementChild.querySelector('.ingredient-quantity');
                 newQuantityInput.addEventListener('input', updateRecipeCost);
+
+                const newSelectInput = ingredientsContainer.lastElementChild.querySelector('.ingredient-select');
+                newSelectInput.addEventListener('change', updateRecipeCost);
             });
 
             // Initial sign-in call
@@ -374,12 +408,6 @@
                 }
             })();
         });
-
-        // Function to update recipe cost in real-time (not yet implemented fully)
-        // This function would need to listen to changes on all ingredient select and quantity inputs in the recipe form
-        function updateRecipeCost() {
-            // Implementation to be added here.
-        }
     </script>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800">
@@ -393,7 +421,7 @@
                 <span id="user-id-display" class="block mt-2 text-xs text-gray-400"></span>
             </p>
 
-            <div id="message-box" class="mb-4 p-4 rounded-lg text-sm text-white hidden transition-all duration-300 font-medium"></div>
+            <div id="message-box" class="mb-4 p-4 rounded-lg text-sm text-white hidden transition-all duration-300 font-medium message-box"></div>
 
             <!-- Sezione per la gestione degli ingredienti -->
             <div class="bg-gray-50 p-6 rounded-xl mb-8 border border-gray-100 shadow-inner">
@@ -447,6 +475,7 @@
                     
                     <div class="flex items-center gap-4 pt-4">
                         <input type="number" step="0.01" id="new-recipe-price" placeholder="Prezzo di vendita (€)" class="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                        <span id="current-recipe-cost" class="font-bold text-gray-700 text-sm">Costo Totale: €0.00</span>
                         <button type="submit" class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md flex items-center justify-center">
                             <i class="fas fa-calculator mr-2"></i> Calcola e Aggiungi
                         </button>
