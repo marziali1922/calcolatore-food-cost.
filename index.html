@@ -1,420 +1,374 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot, collection, query, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Cost Manager</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// --- Firebase Configuration and Initialization ---
-// The following variables are provided by the canvas environment.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // Global variables provided by the canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Initialize Firebase App
-let app, db, auth;
-try {
-    app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
-} catch (error) {
-    console.error("Error initializing Firebase:", error);
-}
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        let userId;
 
-// --- App Component ---
-export default function App() {
-    // State variables for the application
-    const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
-    const [ingredients, setIngredients] = useState([]);
-    const [newIngredient, setNewIngredient] = useState({ name: '', cost: '', unit: '' });
-    const [recipes, setRecipes] = useState([]);
-    const [newRecipe, setNewRecipe] = useState({ name: '', ingredients: [{ ingredientId: '', quantity: '' }], price: '' });
-    const [loading, setLoading] = useState(true);
-    const [message, setMessage] = useState('');
-    const [isError, setIsError] = useState(false);
+        // --- DOM Elements ---
+        const messageBox = document.getElementById('message-box');
+        const ingredientsForm = document.getElementById('ingredients-form');
+        const ingredientsList = document.getElementById('ingredients-list');
+        const recipesForm = document.getElementById('recipes-form');
+        const recipesList = document.getElementById('recipes-list');
+        const addIngredientButton = document.getElementById('add-recipe-ingredient-btn');
+        const newIngredientNameInput = document.getElementById('new-ingredient-name');
+        const newIngredientCostInput = document.getElementById('new-ingredient-cost');
+        const newIngredientUnitInput = document.getElementById('new-ingredient-unit');
+        const userIdDisplay = document.getElementById('user-id-display');
 
-    // Effect to handle Firebase authentication and data loading
-    useEffect(() => {
-        // Asynchronously sign in the user
-        const signInAndLoad = async () => {
-            if (!auth || !db) {
-                console.error("Firebase services not initialized.");
-                setLoading(false);
-                return;
-            }
+        let ingredients = [];
 
-            try {
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Firebase auth failed:", error);
-            }
-        };
-
-        // Listen for auth state changes
-        const unsubscribeAuth = onAuthStateChanged(auth, user => {
-            if (user) {
-                setUserId(user.uid);
-                setIsAuthReady(true);
+        // --- Helper Functions ---
+        function showMessage(msg, isError = false) {
+            messageBox.textContent = msg;
+            messageBox.classList.remove('bg-green-500', 'bg-red-500', 'hidden');
+            if (isError) {
+                messageBox.classList.add('bg-red-500');
             } else {
-                setUserId(null);
-                setIsAuthReady(true);
+                messageBox.classList.add('bg-green-500');
             }
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        // --- Data Loading and Real-time Updates ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+            } else {
+                // If no user, sign in anonymously
+                await signInAnonymously(auth);
+                userId = auth.currentUser.uid;
+            }
+            userIdDisplay.textContent = `ID Utente: ${userId}`;
+            loadData();
         });
 
-        signInAndLoad();
+        async function loadData() {
+            try {
+                // Subscribe to real-time updates for ingredients
+                const ingredientsQuery = collection(db, 'artifacts', appId, 'users', userId, 'ingredients');
+                onSnapshot(ingredientsQuery, (snapshot) => {
+                    ingredients = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderIngredients();
+                }, (error) => {
+                    console.error("Errore nel caricamento degli ingredienti:", error);
+                    showMessage("Errore nel caricamento degli ingredienti.", true);
+                });
 
-        // Cleanup function for the listener
-        return () => unsubscribeAuth();
-    }, []);
+                // Subscribe to real-time updates for recipes
+                const recipesQuery = collection(db, 'artifacts', appId, 'users', userId, 'recipes');
+                onSnapshot(recipesQuery, (snapshot) => {
+                    const recipes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    renderRecipes(recipes);
+                }, (error) => {
+                    console.error("Errore nel caricamento delle ricette:", error);
+                    showMessage("Errore nel caricamento delle ricette.", true);
+                });
 
-    // Effect to listen for real-time data updates from Firestore
-    useEffect(() => {
-        if (!isAuthReady || !userId || !db) return;
-
-        // Listen for ingredient changes
-        const ingredientsRef = collection(db, 'artifacts', appId, 'users', userId, 'ingredients');
-        const unsubscribeIngredients = onSnapshot(ingredientsRef, (snapshot) => {
-            const fetchedIngredients = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setIngredients(fetchedIngredients);
-        }, (error) => {
-            console.error("Error fetching ingredients:", error);
-            showMessage("Errore nel caricamento degli ingredienti.", true);
-        });
-
-        // Listen for recipe changes
-        const recipesRef = collection(db, 'artifacts', appId, 'users', userId, 'recipes');
-        const unsubscribeRecipes = onSnapshot(recipesRef, (snapshot) => {
-            const fetchedRecipes = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            setRecipes(fetchedRecipes);
-        }, (error) => {
-            console.error("Error fetching recipes:", error);
-            showMessage("Errore nel caricamento delle ricette.", true);
-        });
-
-        setLoading(false);
-
-        // Cleanup function
-        return () => {
-            unsubscribeIngredients();
-            unsubscribeRecipes();
-        };
-    }, [isAuthReady, userId, appId, db]);
-
-    // Function to display a temporary message
-    const showMessage = (msg, isErr = false) => {
-        setMessage(msg);
-        setIsError(isErr);
-        setTimeout(() => {
-            setMessage('');
-        }, 5000);
-    };
-
-    // --- Ingredient Management ---
-    const handleAddIngredient = async (e) => {
-        e.preventDefault();
-        if (!newIngredient.name.trim() || !newIngredient.cost || !newIngredient.unit.trim()) {
-            showMessage('Per favore, compila tutti i campi per l\'ingrediente.', true);
-            return;
-        }
-
-        const ingredientExists = ingredients.some(ing => ing.name === newIngredient.name.trim());
-        if (ingredientExists) {
-            showMessage('Questo ingrediente esiste già. Usa un altro nome.', true);
-            return;
-        }
-
-        try {
-            await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'ingredients'), {
-                name: newIngredient.name.trim(),
-                cost: parseFloat(newIngredient.cost),
-                unit: newIngredient.unit.trim()
-            });
-            setNewIngredient({ name: '', cost: '', unit: '' });
-            showMessage('Ingrediente aggiunto con successo!', false);
-        } catch (error) {
-            console.error("Error adding ingredient:", error);
-            showMessage('Errore durante l\'aggiunta dell\'ingrediente.', true);
-        }
-    };
-
-    const handleDeleteIngredient = async (ingredientId) => {
-        try {
-            await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'ingredients', ingredientId));
-            showMessage('Ingrediente eliminato con successo.', false);
-        } catch (error) {
-            console.error("Error deleting ingredient:", error);
-            showMessage('Errore durante l\'eliminazione dell\'ingrediente.', true);
-        }
-    };
-
-    // --- Recipe Management ---
-    const handleAddRecipeIngredient = () => {
-        setNewRecipe(prev => ({
-            ...prev,
-            ingredients: [...prev.ingredients, { ingredientId: '', quantity: '' }]
-        }));
-    };
-
-    const handleRemoveRecipeIngredient = (index) => {
-        const updatedIngredients = [...newRecipe.ingredients];
-        updatedIngredients.splice(index, 1);
-        setNewRecipe(prev => ({
-            ...prev,
-            ingredients: updatedIngredients
-        }));
-    };
-
-    const handleRecipeChange = (e, index) => {
-        const { name, value } = e.target;
-        if (name === 'recipeName' || name === 'recipePrice') {
-            setNewRecipe(prev => ({ ...prev, [name]: value }));
-        } else {
-            const updatedIngredients = [...newRecipe.ingredients];
-            updatedIngredients[index][name] = value;
-            setNewRecipe(prev => ({ ...prev, ingredients: updatedIngredients }));
-        }
-    };
-
-    const handleAddRecipe = async (e) => {
-        e.preventDefault();
-        if (!newRecipe.name.trim() || !newRecipe.price) {
-            showMessage('Per favore, inserisci un nome per la ricetta e un prezzo di vendita.', true);
-            return;
-        }
-        if (newRecipe.ingredients.some(ing => !ing.ingredientId || !ing.quantity)) {
-            showMessage('Per favore, compila tutti i campi degli ingredienti della ricetta.', true);
-            return;
-        }
-
-        // Calculate total cost
-        let totalCost = 0;
-        for (const recipeIngredient of newRecipe.ingredients) {
-            const ingredient = ingredients.find(ing => ing.id === recipeIngredient.ingredientId);
-            if (ingredient) {
-                totalCost += ingredient.cost * parseFloat(recipeIngredient.quantity);
+            } catch (error) {
+                console.error("Errore nel caricamento dei dati:", error);
+                showMessage("Errore nel caricamento dei dati.", true);
             }
         }
-        const profit = parseFloat(newRecipe.price) - totalCost;
 
-        try {
-            await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'recipes'), {
-                name: newRecipe.name.trim(),
-                ingredients: newRecipe.ingredients,
-                price: parseFloat(newRecipe.price),
-                cost: totalCost,
-                profit: profit
+        // --- Render Functions ---
+        function renderIngredients() {
+            ingredientsList.innerHTML = '';
+            const selectIngredient = document.querySelectorAll('.ingredient-select');
+            
+            ingredients.forEach(ingredient => {
+                // Render list item for ingredients
+                const li = document.createElement('div');
+                li.className = "flex items-center justify-between p-4 bg-white rounded-lg shadow-sm border border-gray-200";
+                li.innerHTML = `
+                    <div>
+                        <span class="font-semibold text-gray-800">${ingredient.name}</span>
+                        <span class="block text-gray-500 text-sm">Costo: €${ingredient.cost.toFixed(2)} per ${ingredient.unit}</span>
+                    </div>
+                    <button class="text-red-500 hover:text-red-700 transition duration-200 delete-ingredient-btn" data-id="${ingredient.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>
+                `;
+                ingredientsList.appendChild(li);
+
+                // Update select dropdowns for recipes
+                const option = document.createElement('option');
+                option.value = ingredient.id;
+                option.textContent = ingredient.name;
+                selectIngredient.forEach(select => {
+                    // Check if option already exists
+                    if (!select.querySelector(`option[value="${ingredient.id}"]`)) {
+                        select.appendChild(option.cloneNode(true));
+                    }
+                });
             });
-            setNewRecipe({ name: '', ingredients: [{ ingredientId: '', quantity: '' }], price: '' });
-            showMessage('Ricetta aggiunta e calcolata con successo!', false);
-        } catch (error) {
-            console.error("Error adding recipe:", error);
-            showMessage('Errore durante l\'aggiunta della ricetta.', true);
+
+            // Re-attach event listeners for delete buttons
+            document.querySelectorAll('.delete-ingredient-btn').forEach(button => {
+                button.addEventListener('click', async (e) => {
+                    const id = e.currentTarget.dataset.id;
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'ingredients', id));
+                    showMessage('Ingrediente eliminato con successo.', false);
+                });
+            });
         }
-    };
 
-    const handleDeleteRecipe = async (recipeId) => {
-        try {
-            await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'recipes', recipeId));
-            showMessage('Ricetta eliminata con successo.', false);
-        } catch (error) {
-            console.error("Error deleting recipe:", error);
-            showMessage('Errore durante l\'eliminazione della ricetta.', true);
+        function renderRecipes(recipes) {
+            recipesList.innerHTML = '';
+            recipes.forEach(recipe => {
+                const li = document.createElement('div');
+                li.className = "p-4 bg-white rounded-lg shadow-sm border border-gray-200";
+                li.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-semibold text-gray-800 text-lg">${recipe.name}</h3>
+                        <button class="text-red-500 hover:text-red-700 transition duration-200 delete-recipe-btn" data-id="${recipe.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="text-sm text-gray-600 mt-2">
+                        <p>Costo totale: <span class="font-medium text-gray-900">€${recipe.cost.toFixed(2)}</span></p>
+                        <p>Prezzo di vendita: <span class="font-medium text-gray-900">€${recipe.price.toFixed(2)}</span></p>
+                        <p>Profitto: <span class="font-bold text-lg text-green-600">€${recipe.profit.toFixed(2)}</span></p>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-2 border-t pt-2">
+                        Ingredienti:
+                        <ul class="list-disc list-inside ml-2">
+                            ${recipe.ingredients.map(ing => {
+                                const foundIngredient = ingredients.find(i => i.id === ing.ingredientId);
+                                return foundIngredient ? `<li>${foundIngredient.name} (${ing.quantity} ${foundIngredient.unit})</li>` : '';
+                            }).join('')}
+                        </ul>
+                    </div>
+                `;
+                recipesList.appendChild(li);
+            });
+
+            // Re-attach event listeners for delete buttons
+            document.querySelectorAll('.delete-recipe-btn').forEach(button => {
+                button.addEventListener('click', async (e) => {
+                    const id = e.currentTarget.dataset.id;
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'recipes', id));
+                    showMessage('Ricetta eliminata con successo.', false);
+                });
+            });
         }
-    };
+        
+        // --- Event Listeners ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Add Ingredient
+            ingredientsForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = newIngredientNameInput.value.trim();
+                const cost = parseFloat(newIngredientCostInput.value);
+                const unit = newIngredientUnitInput.value.trim();
 
-    if (loading || !isAuthReady) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-100">
-                <p className="text-gray-600 text-lg">Caricamento in corso...</p>
-            </div>
-        );
-    }
+                if (!name || isNaN(cost) || !unit) {
+                    showMessage('Per favore, compila tutti i campi per l\'ingrediente.', true);
+                    return;
+                }
 
-    return (
-        <div className="bg-gray-100 p-4 sm:p-8 min-h-screen font-sans">
-            <div className="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-10 border border-gray-200">
-                <h1 className="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-2">Food Cost Manager</h1>
-                <p className="text-center text-gray-500 mb-8">
-                    Gestisci i tuoi ingredienti, ricette e calcola i profitti.
-                    <span className="block mt-2 text-xs text-gray-400">ID Utente: {userId}</span>
-                </p>
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'ingredients'), {
+                        name,
+                        cost,
+                        unit
+                    });
+                    newIngredientNameInput.value = '';
+                    newIngredientCostInput.value = '';
+                    newIngredientUnitInput.value = '';
+                    showMessage('Ingrediente aggiunto con successo!', false);
+                } catch (error) {
+                    console.error("Errore durante l'aggiunta dell'ingrediente:", error);
+                    showMessage("Errore durante l'aggiunta dell'ingrediente.", true);
+                }
+            });
 
-                {message && (
-                    <div className={`mb-4 p-4 rounded-lg text-sm text-white ${isError ? 'bg-red-500' : 'bg-green-500'}`}>
-                        {message}
-                    </div>
-                )}
+            // Add Recipe
+            recipesForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const recipeName = document.getElementById('new-recipe-name').value.trim();
+                const recipePrice = parseFloat(document.getElementById('new-recipe-price').value);
+                
+                const recipeIngredients = [];
+                let totalCost = 0;
 
-                {/* Sezione per la gestione degli ingredienti */}
-                <div className="bg-gray-50 p-6 rounded-xl mb-8">
-                    <h2 className="text-2xl font-semibold text-gray-700 mb-4">I tuoi ingredienti</h2>
-                    <div className="space-y-4">
-                        {ingredients.map(ingredient => (
-                            <div key={ingredient.id} className="flex items-center justify-between p-4 bg-white rounded-lg shadow-sm border border-gray-200">
-                                <div>
-                                    <span className="font-semibold text-gray-800">{ingredient.name}</span>
-                                    <span className="block text-gray-500 text-sm">Costo: €{ingredient.cost.toFixed(2)} per {ingredient.unit}</span>
-                                </div>
-                                <button
-                                    onClick={() => handleDeleteIngredient(ingredient.id)}
-                                    className="text-red-500 hover:text-red-700 transition duration-200"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                    <form onSubmit={handleAddIngredient} className="mt-6 flex flex-col sm:flex-row gap-4">
-                        <input
-                            type="text"
-                            placeholder="Nome ingrediente (es. Farina)"
-                            value={newIngredient.name}
-                            onChange={(e) => setNewIngredient({ ...newIngredient, name: e.target.value })}
-                            className="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                        />
-                        <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Costo per unità (€)"
-                            value={newIngredient.cost}
-                            onChange={(e) => setNewIngredient({ ...newIngredient, cost: e.target.value })}
-                            className="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                        />
-                        <input
-                            type="text"
-                            placeholder="Unità (es. kg)"
-                            value={newIngredient.unit}
-                            onChange={(e) => setNewIngredient({ ...newIngredient, unit: e.target.value })}
-                            className="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                        />
-                        <button type="submit" className="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
-                            Aggiungi Ingrediente
-                        </button>
-                    </form>
-                </div>
+                const ingredientItems = recipesForm.querySelectorAll('.recipe-ingredient-item');
+                ingredientItems.forEach(item => {
+                    const ingredientId = item.querySelector('.ingredient-select').value;
+                    const quantity = parseFloat(item.querySelector('.ingredient-quantity').value);
 
-                {/* Sezione per la gestione delle ricette */}
-                <div className="bg-gray-50 p-6 rounded-xl mb-8">
-                    <h2 className="text-2xl font-semibold text-gray-700 mb-4">Le tue ricette</h2>
-                    <div className="space-y-4">
-                        {recipes.map(recipe => (
-                            <div key={recipe.id} className="p-4 bg-white rounded-lg shadow-sm border border-gray-200">
-                                <div className="flex items-center justify-between">
-                                    <h3 className="font-semibold text-gray-800 text-lg">{recipe.name}</h3>
-                                    <button
-                                        onClick={() => handleDeleteRecipe(recipe.id)}
-                                        className="text-red-500 hover:text-red-700 transition duration-200"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div className="text-sm text-gray-600 mt-2">
-                                    <p>Costo totale: <span className="font-medium text-gray-900">€{recipe.cost.toFixed(2)}</span></p>
-                                    <p>Prezzo di vendita: <span className="font-medium text-gray-900">€{recipe.price.toFixed(2)}</span></p>
-                                    <p>Profitto: <span className="font-bold text-lg text-green-600">€{recipe.profit.toFixed(2)}</span></p>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-2 border-t pt-2">
-                                    Ingredienti:
-                                    <ul className="list-disc list-inside ml-2">
-                                        {recipe.ingredients.map((ing, index) => {
-                                            const foundIngredient = ingredients.find(i => i.id === ing.ingredientId);
-                                            return foundIngredient ? (
-                                                <li key={index}>{foundIngredient.name} ({ing.quantity} {foundIngredient.unit})</li>
-                                            ) : null;
-                                        })}
-                                    </ul>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    
-                    <form onSubmit={handleAddRecipe} className="mt-6 space-y-4">
-                        <input
-                            type="text"
-                            placeholder="Nome ricetta"
-                            name="recipeName"
-                            value={newRecipe.name}
-                            onChange={handleRecipeChange}
-                            className="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                        />
-                        
-                        {newRecipe.ingredients.map((ing, index) => (
-                            <div key={index} className="flex flex-col sm:flex-row gap-2 items-end">
-                                <div className="flex-1 w-full">
-                                    <label className="block text-sm font-medium text-gray-700">Ingrediente</label>
-                                    <select
-                                        name="ingredientId"
-                                        value={ing.ingredientId}
-                                        onChange={(e) => handleRecipeChange(e, index)}
-                                        className="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                                    >
-                                        <option value="">Seleziona un ingrediente</option>
-                                        {ingredients.map(ingredient => (
-                                            <option key={ingredient.id} value={ingredient.id}>{ingredient.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="w-full sm:w-1/4">
-                                    <label className="block text-sm font-medium text-gray-700">Quantità</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        name="quantity"
-                                        value={ing.quantity}
-                                        onChange={(e) => handleRecipeChange(e, index)}
-                                        className="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                                    />
-                                </div>
-                                {newRecipe.ingredients.length > 1 && (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleRemoveRecipeIngredient(index)}
-                                        className="remove-recipe-ingredient-btn text-red-500 hover:text-red-700 transition duration-200 p-2 rounded-full"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                    </button>
-                                )}
-                            </div>
-                        ))}
+                    if (ingredientId && quantity) {
+                        const foundIngredient = ingredients.find(ing => ing.id === ingredientId);
+                        if (foundIngredient) {
+                            recipeIngredients.push({ ingredientId, quantity });
+                            totalCost += foundIngredient.cost * quantity;
+                        }
+                    }
+                });
 
-                        <button type="button" onClick={handleAddRecipeIngredient} className="bg-gray-300 text-gray-700 p-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200">
-                            Aggiungi Ingrediente alla Ricetta
-                        </button>
-                        
-                        <div className="flex items-center gap-4 pt-4">
-                            <input
-                                type="number"
-                                step="0.01"
-                                placeholder="Prezzo di vendita (€)"
-                                name="recipePrice"
-                                value={newRecipe.price}
-                                onChange={handleRecipeChange}
-                                className="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                            />
-                            <button type="submit" className="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md">
-                                Calcola Costo e Aggiungi
-                            </button>
+                if (!recipeName || isNaN(recipePrice) || recipeIngredients.length === 0) {
+                    showMessage('Per favore, compila tutti i campi della ricetta.', true);
+                    return;
+                }
+
+                const profit = recipePrice - totalCost;
+
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'users', userId, 'recipes'), {
+                        name: recipeName,
+                        ingredients: recipeIngredients,
+                        price: recipePrice,
+                        cost: totalCost,
+                        profit: profit
+                    });
+                    recipesForm.reset();
+                    // Clear dynamically added ingredients
+                    recipesForm.querySelectorAll('.recipe-ingredient-item:not(:first-of-type)').forEach(el => el.remove());
+                    showMessage('Ricetta aggiunta con successo!', false);
+                } catch (error) {
+                    console.error("Errore durante l'aggiunta della ricetta:", error);
+                    showMessage("Errore durante l'aggiunta della ricetta.", true);
+                }
+            });
+
+            // Add new ingredient field to recipe form
+            addIngredientButton.addEventListener('click', () => {
+                const ingredientsContainer = document.getElementById('recipe-ingredients-container');
+                const newIngredientHtml = `
+                    <div class="flex flex-col sm:flex-row gap-2 items-end mt-2 recipe-ingredient-item">
+                        <div class="flex-1 w-full">
+                            <label class="block text-sm font-medium text-gray-700">Ingrediente</label>
+                            <select class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-select">
+                                <option value="">Seleziona un ingrediente</option>
+                                ${ingredients.map(ing => `<option value="${ing.id}">${ing.name}</option>`).join('')}
+                            </select>
                         </div>
-                    </form>
-                </div>
+                        <div class="w-full sm:w-1/4">
+                            <label class="block text-sm font-medium text-gray-700">Quantità</label>
+                            <input type="number" step="0.01" class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-quantity" placeholder="Quantità" />
+                        </div>
+                        <button type="button" class="text-red-500 hover:text-red-700 transition duration-200 p-2 rounded-full remove-recipe-ingredient-btn">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    </div>
+                `;
+                ingredientsContainer.insertAdjacentHTML('beforeend', newIngredientHtml);
+                
+                // Attach event listener to the new remove button
+                const newRemoveButton = ingredientsContainer.lastElementChild.querySelector('.remove-recipe-ingredient-btn');
+                newRemoveButton.addEventListener('click', (e) => {
+                    e.currentTarget.closest('.recipe-ingredient-item').remove();
+                });
+            });
 
+            // Initial sign-in call
+            (async () => {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) {
+                    console.error("Firebase auth failed:", error);
+                }
+            })();
+        });
+    </script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="p-4 sm:p-8 min-h-screen">
+        <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-10 border border-gray-200">
+            <h1 class="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-2">Food Cost Manager</h1>
+            <p class="text-center text-gray-500 mb-8">
+                Gestisci i tuoi ingredienti, ricette e calcola i profitti.
+                <span id="user-id-display" class="block mt-2 text-xs text-gray-400"></span>
+            </p>
+
+            <div id="message-box" class="mb-4 p-4 rounded-lg text-sm text-white hidden transition-all duration-300"></div>
+
+            <!-- Sezione per la gestione degli ingredienti -->
+            <div class="bg-gray-50 p-6 rounded-xl mb-8">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">I tuoi ingredienti</h2>
+                <div id="ingredients-list" class="space-y-4">
+                    <!-- Ingredients will be rendered here by JavaScript -->
+                </div>
+                <form id="ingredients-form" class="mt-6 flex flex-col sm:flex-row gap-4">
+                    <input type="text" id="new-ingredient-name" placeholder="Nome ingrediente (es. Farina)" class="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                    <input type="number" step="0.01" id="new-ingredient-cost" placeholder="Costo per unità (€)" class="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                    <input type="text" id="new-ingredient-unit" placeholder="Unità (es. kg)" class="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                    <button type="submit" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
+                        Aggiungi Ingrediente
+                    </button>
+                </form>
+            </div>
+
+            <!-- Sezione per la gestione delle ricette -->
+            <div class="bg-gray-50 p-6 rounded-xl mb-8">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Le tue ricette</h2>
+                <div id="recipes-list" class="space-y-4">
+                    <!-- Recipes will be rendered here by JavaScript -->
+                </div>
+                
+                <form id="recipes-form" class="mt-6 space-y-4">
+                    <input type="text" id="new-recipe-name" placeholder="Nome ricetta" class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                    
+                    <div id="recipe-ingredients-container">
+                        <div class="flex flex-col sm:flex-row gap-2 items-end recipe-ingredient-item">
+                             <div class="flex-1 w-full">
+                                <label class="block text-sm font-medium text-gray-700">Ingrediente</label>
+                                <select class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-select" required>
+                                    <option value="">Seleziona un ingrediente</option>
+                                    <!-- Options will be populated by JavaScript -->
+                                </select>
+                            </div>
+                            <div class="w-full sm:w-1/4">
+                                <label class="block text-sm font-medium text-gray-700">Quantità</label>
+                                <input type="number" step="0.01" class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-quantity" placeholder="Quantità" required/>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="button" id="add-recipe-ingredient-btn" class="bg-gray-300 text-gray-700 p-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200">
+                        Aggiungi Ingrediente alla Ricetta
+                    </button>
+                    
+                    <div class="flex items-center gap-4 pt-4">
+                        <input type="number" step="0.01" id="new-recipe-price" placeholder="Prezzo di vendita (€)" class="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
+                        <button type="submit" class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md">
+                            Calcola Costo e Aggiungi
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
-    );
-}
-
+    </div>
+</body>
+</html>
