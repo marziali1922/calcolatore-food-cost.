@@ -3,9 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Food Cost Manager</title>
+    <title>Food Cost Manager Pro</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome per le icone -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" xintegrity="sha512-Fo3rlrZj/k7p7x1c3/6Q6t+uH0T6x/2j2F0+z6ZgL9e8K+6t2gK6j9OaVp/zE2oY8u9E0rD4lM4q/g6WjQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #f0f4f8, #e6e9f0);
+        }
+    </style>
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -29,22 +37,27 @@
         const ingredientsList = document.getElementById('ingredients-list');
         const recipesForm = document.getElementById('recipes-form');
         const recipesList = document.getElementById('recipes-list');
-        const addIngredientButton = document.getElementById('add-recipe-ingredient-btn');
-        const newIngredientNameInput = document.getElementById('new-ingredient-name');
-        const newIngredientCostInput = document.getElementById('new-ingredient-cost');
-        const newIngredientUnitInput = document.getElementById('new-ingredient-unit');
+        const addRecipeIngredientButton = document.getElementById('add-recipe-ingredient-btn');
+        const ingredientsContainer = document.getElementById('recipe-ingredients-container');
         const userIdDisplay = document.getElementById('user-id-display');
-
+        const modal = document.getElementById('edit-modal');
+        const closeModalBtn = document.getElementById('close-modal');
+        const editForm = document.getElementById('edit-form');
+        const editNameInput = document.getElementById('edit-name');
+        const editCostInput = document.getElementById('edit-cost');
+        const editUnitInput = document.getElementById('edit-unit');
+        const saveEditButton = document.getElementById('save-edit-btn');
+        
         let ingredients = [];
 
         // --- Helper Functions ---
         function showMessage(msg, isError = false) {
             messageBox.textContent = msg;
-            messageBox.classList.remove('bg-green-500', 'bg-red-500', 'hidden');
+            messageBox.classList.remove('bg-green-600', 'bg-red-600', 'hidden');
             if (isError) {
-                messageBox.classList.add('bg-red-500');
+                messageBox.classList.add('bg-red-600');
             } else {
-                messageBox.classList.add('bg-green-500');
+                messageBox.classList.add('bg-green-600');
             }
             setTimeout(() => {
                 messageBox.classList.add('hidden');
@@ -56,7 +69,6 @@
             if (user) {
                 userId = user.uid;
             } else {
-                // If no user, sign in anonymously
                 await signInAnonymously(auth);
                 userId = auth.currentUser.uid;
             }
@@ -95,69 +107,72 @@
         // --- Render Functions ---
         function renderIngredients() {
             ingredientsList.innerHTML = '';
-            const selectIngredient = document.querySelectorAll('.ingredient-select');
+            // Get all ingredient select dropdowns in the recipe form
+            const selectIngredients = document.querySelectorAll('.ingredient-select');
             
             ingredients.forEach(ingredient => {
-                // Render list item for ingredients
                 const li = document.createElement('div');
-                li.className = "flex items-center justify-between p-4 bg-white rounded-lg shadow-sm border border-gray-200";
+                li.className = "flex items-center justify-between p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
                 li.innerHTML = `
                     <div>
-                        <span class="font-semibold text-gray-800">${ingredient.name}</span>
+                        <span class="font-semibold text-gray-800 text-lg">${ingredient.name}</span>
                         <span class="block text-gray-500 text-sm">Costo: €${ingredient.cost.toFixed(2)} per ${ingredient.unit}</span>
                     </div>
-                    <button class="text-red-500 hover:text-red-700 transition duration-200 delete-ingredient-btn" data-id="${ingredient.id}">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        <button class="text-blue-500 hover:text-blue-700 transition duration-200 edit-ingredient-btn" data-id="${ingredient.id}">
+                            <i class="fas fa-edit text-xl"></i>
+                        </button>
+                        <button class="text-red-500 hover:text-red-700 transition duration-200 delete-ingredient-btn" data-id="${ingredient.id}">
+                            <i class="fas fa-trash-alt text-xl"></i>
+                        </button>
+                    </div>
                 `;
                 ingredientsList.appendChild(li);
 
-                // Update select dropdowns for recipes
-                const option = document.createElement('option');
-                option.value = ingredient.id;
-                option.textContent = ingredient.name;
-                selectIngredient.forEach(select => {
-                    // Check if option already exists
+                // Update all select dropdowns for recipes
+                selectIngredients.forEach(select => {
+                    const option = document.createElement('option');
+                    option.value = ingredient.id;
+                    option.textContent = ingredient.name;
+                    // Check if option already exists to avoid duplicates
                     if (!select.querySelector(`option[value="${ingredient.id}"]`)) {
-                        select.appendChild(option.cloneNode(true));
+                        select.appendChild(option);
                     }
                 });
             });
 
-            // Re-attach event listeners for delete buttons
-            document.querySelectorAll('.delete-ingredient-btn').forEach(button => {
-                button.addEventListener('click', async (e) => {
-                    const id = e.currentTarget.dataset.id;
-                    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'ingredients', id));
-                    showMessage('Ingrediente eliminato con successo.', false);
-                });
-            });
+            // Add new ingredient button
+            const addIngredientBtn = document.getElementById('add-ingredient-btn');
+            if (!addIngredientBtn) {
+                const addBtnHtml = `<button id="add-ingredient-btn" type="submit" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md flex items-center justify-center">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Ingrediente
+                </button>`;
+                ingredientsForm.insertAdjacentHTML('beforeend', addBtnHtml);
+            }
+            
+            attachIngredientEventListeners();
         }
 
         function renderRecipes(recipes) {
             recipesList.innerHTML = '';
             recipes.forEach(recipe => {
                 const li = document.createElement('div');
-                li.className = "p-4 bg-white rounded-lg shadow-sm border border-gray-200";
+                li.className = "p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200 transition-transform transform hover:scale-[1.01] duration-200";
                 li.innerHTML = `
                     <div class="flex items-center justify-between">
                         <h3 class="font-semibold text-gray-800 text-lg">${recipe.name}</h3>
                         <button class="text-red-500 hover:text-red-700 transition duration-200 delete-recipe-btn" data-id="${recipe.id}">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
+                             <i class="fas fa-trash-alt text-xl"></i>
                         </button>
                     </div>
                     <div class="text-sm text-gray-600 mt-2">
                         <p>Costo totale: <span class="font-medium text-gray-900">€${recipe.cost.toFixed(2)}</span></p>
                         <p>Prezzo di vendita: <span class="font-medium text-gray-900">€${recipe.price.toFixed(2)}</span></p>
-                        <p>Profitto: <span class="font-bold text-lg text-green-600">€${recipe.profit.toFixed(2)}</span></p>
+                        <p>Profitto: <span class="font-bold text-lg ${recipe.profit >= 0 ? 'text-green-600' : 'text-red-600'}">€${recipe.profit.toFixed(2)}</span></p>
                     </div>
-                    <div class="text-xs text-gray-500 mt-2 border-t pt-2">
-                        Ingredienti:
-                        <ul class="list-disc list-inside ml-2">
+                    <div class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2">
+                        <span class="font-semibold text-gray-700">Ingredienti:</span>
+                        <ul class="list-disc list-inside ml-2 mt-1">
                             ${recipe.ingredients.map(ing => {
                                 const foundIngredient = ingredients.find(i => i.id === ing.ingredientId);
                                 return foundIngredient ? `<li>${foundIngredient.name} (${ing.quantity} ${foundIngredient.unit})</li>` : '';
@@ -173,19 +188,43 @@
                 button.addEventListener('click', async (e) => {
                     const id = e.currentTarget.dataset.id;
                     await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'recipes', id));
-                    showMessage('Ricetta eliminata con successo.', false);
+                    showMessage('Ricetta eliminata con successo!', false);
                 });
             });
         }
         
         // --- Event Listeners ---
+        function attachIngredientEventListeners() {
+            document.querySelectorAll('.delete-ingredient-btn').forEach(button => {
+                button.addEventListener('click', async (e) => {
+                    const id = e.currentTarget.dataset.id;
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', userId, 'ingredients', id));
+                    showMessage('Ingrediente eliminato con successo!', false);
+                });
+            });
+
+            document.querySelectorAll('.edit-ingredient-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const id = e.currentTarget.dataset.id;
+                    const ingredientToEdit = ingredients.find(ing => ing.id === id);
+                    if (ingredientToEdit) {
+                        editNameInput.value = ingredientToEdit.name;
+                        editCostInput.value = ingredientToEdit.cost;
+                        editUnitInput.value = ingredientToEdit.unit;
+                        saveEditButton.dataset.id = id;
+                        modal.classList.remove('hidden');
+                    }
+                });
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
-            // Add Ingredient
+            // Add/Edit Ingredient
             ingredientsForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const name = newIngredientNameInput.value.trim();
-                const cost = parseFloat(newIngredientCostInput.value);
-                const unit = newIngredientUnitInput.value.trim();
+                const name = document.getElementById('new-ingredient-name').value.trim();
+                const cost = parseFloat(document.getElementById('new-ingredient-cost').value);
+                const unit = document.getElementById('new-ingredient-unit').value.trim();
 
                 if (!name || isNaN(cost) || !unit) {
                     showMessage('Per favore, compila tutti i campi per l\'ingrediente.', true);
@@ -198,13 +237,48 @@
                         cost,
                         unit
                     });
-                    newIngredientNameInput.value = '';
-                    newIngredientCostInput.value = '';
-                    newIngredientUnitInput.value = '';
+                    ingredientsForm.reset();
                     showMessage('Ingrediente aggiunto con successo!', false);
                 } catch (error) {
                     console.error("Errore durante l'aggiunta dell'ingrediente:", error);
                     showMessage("Errore durante l'aggiunta dell'ingrediente.", true);
+                }
+            });
+
+            // Save Edited Ingredient
+            editForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = saveEditButton.dataset.id;
+                const name = editNameInput.value.trim();
+                const cost = parseFloat(editCostInput.value);
+                const unit = editUnitInput.value.trim();
+
+                if (!name || isNaN(cost) || !unit) {
+                    showMessage('Per favore, compila tutti i campi.', true);
+                    return;
+                }
+
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'users', userId, 'ingredients', id), {
+                        name,
+                        cost,
+                        unit
+                    });
+                    modal.classList.add('hidden');
+                    showMessage('Ingrediente modificato con successo!', false);
+                } catch (error) {
+                    console.error("Errore durante la modifica dell'ingrediente:", error);
+                    showMessage("Errore durante la modifica dell'ingrediente.", true);
+                }
+            });
+
+            // Close Modal
+            closeModalBtn.addEventListener('click', () => {
+                modal.classList.add('hidden');
+            });
+            window.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.add('hidden');
                 }
             });
 
@@ -221,7 +295,6 @@
                 ingredientItems.forEach(item => {
                     const ingredientId = item.querySelector('.ingredient-select').value;
                     const quantity = parseFloat(item.querySelector('.ingredient-quantity').value);
-
                     if (ingredientId && quantity) {
                         const foundIngredient = ingredients.find(ing => ing.id === ingredientId);
                         if (foundIngredient) {
@@ -247,7 +320,7 @@
                         profit: profit
                     });
                     recipesForm.reset();
-                    // Clear dynamically added ingredients
+                    // Clear dynamically added ingredients except the first one
                     recipesForm.querySelectorAll('.recipe-ingredient-item:not(:first-of-type)').forEach(el => el.remove());
                     showMessage('Ricetta aggiunta con successo!', false);
                 } catch (error) {
@@ -257,35 +330,35 @@
             });
 
             // Add new ingredient field to recipe form
-            addIngredientButton.addEventListener('click', () => {
-                const ingredientsContainer = document.getElementById('recipe-ingredients-container');
+            addRecipeIngredientButton.addEventListener('click', () => {
                 const newIngredientHtml = `
                     <div class="flex flex-col sm:flex-row gap-2 items-end mt-2 recipe-ingredient-item">
                         <div class="flex-1 w-full">
                             <label class="block text-sm font-medium text-gray-700">Ingrediente</label>
-                            <select class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-select">
+                            <select class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-select" required>
                                 <option value="">Seleziona un ingrediente</option>
                                 ${ingredients.map(ing => `<option value="${ing.id}">${ing.name}</option>`).join('')}
                             </select>
                         </div>
                         <div class="w-full sm:w-1/4">
                             <label class="block text-sm font-medium text-gray-700">Quantità</label>
-                            <input type="number" step="0.01" class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-quantity" placeholder="Quantità" />
+                            <input type="number" step="0.01" class="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 ingredient-quantity" placeholder="Quantità" required/>
                         </div>
                         <button type="button" class="text-red-500 hover:text-red-700 transition duration-200 p-2 rounded-full remove-recipe-ingredient-btn">
-                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
+                            <i class="fas fa-trash-alt text-lg"></i>
                         </button>
                     </div>
                 `;
                 ingredientsContainer.insertAdjacentHTML('beforeend', newIngredientHtml);
                 
-                // Attach event listener to the new remove button
                 const newRemoveButton = ingredientsContainer.lastElementChild.querySelector('.remove-recipe-ingredient-btn');
                 newRemoveButton.addEventListener('click', (e) => {
                     e.currentTarget.closest('.recipe-ingredient-item').remove();
                 });
+                
+                // Attach input listener to the newly added quantity field to update cost
+                const newQuantityInput = ingredientsContainer.lastElementChild.querySelector('.ingredient-quantity');
+                newQuantityInput.addEventListener('input', updateRecipeCost);
             });
 
             // Initial sign-in call
@@ -301,22 +374,32 @@
                 }
             })();
         });
+
+        // Function to update recipe cost in real-time (not yet implemented fully)
+        // This function would need to listen to changes on all ingredient select and quantity inputs in the recipe form
+        function updateRecipeCost() {
+            // Implementation to be added here.
+        }
     </script>
 </head>
-<body class="bg-gray-100 font-sans">
-    <div class="p-4 sm:p-8 min-h-screen">
-        <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-10 border border-gray-200">
-            <h1 class="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-2">Food Cost Manager</h1>
+<body class="bg-gray-100 font-sans text-gray-800">
+    <div class="p-4 sm:p-8 min-h-screen flex items-center justify-center">
+        <div class="max-w-4xl w-full mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-10 border border-gray-200">
+            <h1 class="text-4xl font-extrabold text-center text-gray-900 mb-2">
+                <i class="fas fa-utensils text-blue-500 mr-3"></i> Food Cost Manager
+            </h1>
             <p class="text-center text-gray-500 mb-8">
-                Gestisci i tuoi ingredienti, ricette e calcola i profitti.
+                Gestisci i tuoi ingredienti, ricette e calcola i profitti in tempo reale.
                 <span id="user-id-display" class="block mt-2 text-xs text-gray-400"></span>
             </p>
 
-            <div id="message-box" class="mb-4 p-4 rounded-lg text-sm text-white hidden transition-all duration-300"></div>
+            <div id="message-box" class="mb-4 p-4 rounded-lg text-sm text-white hidden transition-all duration-300 font-medium"></div>
 
             <!-- Sezione per la gestione degli ingredienti -->
-            <div class="bg-gray-50 p-6 rounded-xl mb-8">
-                <h2 class="text-2xl font-semibold text-gray-700 mb-4">I tuoi ingredienti</h2>
+            <div class="bg-gray-50 p-6 rounded-xl mb-8 border border-gray-100 shadow-inner">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 flex items-center">
+                    <i class="fas fa-carrot text-orange-500 mr-2"></i> I tuoi ingredienti
+                </h2>
                 <div id="ingredients-list" class="space-y-4">
                     <!-- Ingredients will be rendered here by JavaScript -->
                 </div>
@@ -324,15 +407,17 @@
                     <input type="text" id="new-ingredient-name" placeholder="Nome ingrediente (es. Farina)" class="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
                     <input type="number" step="0.01" id="new-ingredient-cost" placeholder="Costo per unità (€)" class="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
                     <input type="text" id="new-ingredient-unit" placeholder="Unità (es. kg)" class="w-full sm:w-1/4 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
-                    <button type="submit" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
-                        Aggiungi Ingrediente
+                    <button type="submit" class="bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md flex items-center justify-center">
+                        <i class="fas fa-plus mr-2"></i> Aggiungi Ingrediente
                     </button>
                 </form>
             </div>
 
             <!-- Sezione per la gestione delle ricette -->
-            <div class="bg-gray-50 p-6 rounded-xl mb-8">
-                <h2 class="text-2xl font-semibold text-gray-700 mb-4">Le tue ricette</h2>
+            <div class="bg-gray-50 p-6 rounded-xl mb-8 border border-gray-100 shadow-inner">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 flex items-center">
+                    <i class="fas fa-book-open text-green-500 mr-2"></i> Le tue ricette
+                </h2>
                 <div id="recipes-list" class="space-y-4">
                     <!-- Recipes will be rendered here by JavaScript -->
                 </div>
@@ -356,18 +441,47 @@
                         </div>
                     </div>
 
-                    <button type="button" id="add-recipe-ingredient-btn" class="bg-gray-300 text-gray-700 p-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200">
-                        Aggiungi Ingrediente alla Ricetta
+                    <button type="button" id="add-recipe-ingredient-btn" class="bg-gray-300 text-gray-700 p-3 rounded-lg font-semibold hover:bg-gray-400 transition duration-200 flex items-center justify-center">
+                        <i class="fas fa-plus mr-2"></i> Aggiungi Ingrediente alla Ricetta
                     </button>
                     
                     <div class="flex items-center gap-4 pt-4">
                         <input type="number" step="0.01" id="new-recipe-price" placeholder="Prezzo di vendita (€)" class="flex-1 p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200" required />
-                        <button type="submit" class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md">
-                            Calcola Costo e Aggiungi
+                        <button type="submit" class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md flex items-center justify-center">
+                            <i class="fas fa-calculator mr-2"></i> Calcola e Aggiungi
                         </button>
                     </div>
                 </form>
             </div>
+        </div>
+    </div>
+    
+    <!-- Modale per la modifica degli ingredienti -->
+    <div id="edit-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 shadow-xl max-w-sm w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-gray-800">Modifica Ingrediente</h3>
+                <button id="close-modal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="edit-form">
+                <div class="mb-4">
+                    <label for="edit-name" class="block text-sm font-medium text-gray-700">Nome Ingrediente</label>
+                    <input type="text" id="edit-name" class="mt-1 w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="mb-4">
+                    <label for="edit-cost" class="block text-sm font-medium text-gray-700">Costo per unità (€)</label>
+                    <input type="number" step="0.01" id="edit-cost" class="mt-1 w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="edit-unit" class="block text-sm font-medium text-gray-700">Unità</label>
+                    <input type="text" id="edit-unit" class="mt-1 w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                </div>
+                <button id="save-edit-btn" type="submit" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200">
+                    Salva Modifiche
+                </button>
+            </form>
         </div>
     </div>
 </body>
